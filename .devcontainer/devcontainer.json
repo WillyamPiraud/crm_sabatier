@@ -1,0 +1,29 @@
+{
+  "name": "Dolibarr Container",
+  "dockerComposeFile": "../docker-compose.yml",
+  "service": "dolibarr",
+  "workspaceFolder": "/var/www/html",
+  
+  // Configuration pour se connecter au conteneur en cours d'exécution
+  "runServices": [],
+  
+  // Extensions recommandées
+  "extensions": [
+    "ms-azuretools.vscode-docker",
+    "bmewburn.vscode-intelephense-client"
+  ],
+  
+  // Commandes à exécuter après la connexion
+  "postAttachCommand": "echo 'Connecté au conteneur Dolibarr'",
+  
+  // Paramètres personnalisés
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "files.eol": "\n",
+        "files.encoding": "utf8"
+      }
+    }
+  }
+}
+
