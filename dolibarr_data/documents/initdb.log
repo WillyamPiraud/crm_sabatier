@@ -1,9 +1,7 @@
-ERROR 2002 (HY000): Can't connect to server on 'db' (115)
-ERROR 2002 (HY000): Can't connect to server on 'db' (115)
 --------------
 mysql  Ver 15.1 Distrib 10.11.14-MariaDB, for debian-linux-gnu (aarch64) using  EditLine wrapper
 
-Connection id:		3
+Connection id:		258
 Current database:	
 Current user:		dolibarr@172.25.0.4
 SSL:			Not in use
@@ -19,9 +17,9 @@ Db     characterset:	utf8mb4
 Client characterset:	latin1
 Conn.  characterset:	latin1
 TCP port:		3306
-Uptime:			3 sec
+Uptime:			5 hours 15 min 59 sec
 
-Threads: 1  Questions: 4  Slow queries: 0  Opens: 17  Open tables: 10  Queries per second avg: 1.333
+Threads: 1  Questions: 7902  Slow queries: 0  Opens: 116  Open tables: 103  Queries per second avg: 0.416
 --------------
 
 mysql -u dolibarr -pxxxxxx -h db -P 3306 -e "SELECT SCHEMA_NAME FROM information_schema.SCHEMATA WHERE SCHEMA_NAME = 'dolibarr';" > /tmp/docker-run-checkdb.result 2>&1
