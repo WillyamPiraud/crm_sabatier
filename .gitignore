@@ -1,4 +1,23 @@
+# === BASE DE DONNÉES ===
+db_data/
+*.ibd
+*.frm
+*.log
+
+# === DOCUMENTS GÉNÉRÉS PAR DOLIBARR ===
+dolibarr_data/documents/
+dolibarr_data/documents/**
+
+# === BACKUPS MANUELS ===
 dolibarr_data/core_lib_backup/
 dolibarr_data/core_lib_backup.tar.gz
-dolibarr_data/core/lib/
-dolibarr_data/company.lib.php
+
+# === CACHE / TEMP ===
+dolibarr_data/documents/users/temp/
+
+# === ENVIRONNEMENT LOCAL ===
+.env
+.env.local
+
+# === MAC / OS ===
+.DS_Store

@@ -30,6 +30,7 @@ services:
    - ./dolibarr_data/documents:/var/www/documents
    - ./dolibarr_data/custom:/var/www/html/custom
    - ./dolibarr_data/conf:/var/www/html/conf
+   - ./dolibarr_data/core:/var/www/html/core_backup
   depends_on:
    - db
 
