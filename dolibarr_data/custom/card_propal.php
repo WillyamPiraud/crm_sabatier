@@ -739,6 +739,24 @@ if (empty($reshook)) {
 
 					if (!$error) {
 						$db->commit();
+						
+						// Sauvegarder les programmes prévisionnels sélectionnés
+						if ($id > 0) {
+							require_once DOL_DOCUMENT_ROOT."/custom/class/programme_previsionnel.class.php";
+							$programmes_ids = GETPOST("programmes_previsionnels", "array");
+							if (!empty($programmes_ids) && is_array($programmes_ids)) {
+								foreach ($programmes_ids as $prog_id) {
+									$sql = "INSERT INTO ".MAIN_DB_PREFIX."propal_programme_previsionnel";
+									$sql .= " (fk_propal, fk_programme_previsionnel, date_creation, fk_user_creation)";
+									$sql .= " VALUES (".((int) $id).", ".((int) $prog_id).", NOW(), ".((int) $user->id).")";
+									$db->query($sql);
+								}
+							}
+							// Auto-ajout de la ligne de service et des PDFs
+							if (file_exists(DOL_DOCUMENT_ROOT."/custom/core/actions/auto_add_service_line_propal.inc.php")) {
+								include DOL_DOCUMENT_ROOT."/custom/core/actions/auto_add_service_line_propal.inc.php";
+							}
+						}
 
 						// Define output language
 						if (!getDolGlobalString('MAIN_DISABLE_PDF_AUTOUPDATE')) {

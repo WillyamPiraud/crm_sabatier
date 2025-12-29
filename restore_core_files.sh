@@ -3,7 +3,7 @@
 # Usage: ./restore_core_files.sh
 
 CONTAINER_NAME="dolibarr_app"
-BASE_DIR="dolibarr_data/core"
+BASE_DIR="dolibarr_data/core/dolibarr_data/dolibarr_data/core"
 
 echo "🔄 Restauration des fichiers core modifiés..."
 
@@ -31,8 +31,11 @@ copy_file() {
 # Restaurer tous les fichiers en une seule passe
 copy_file "${BASE_DIR}/comm/propal/card.php" "/var/www/html/comm/propal/card.php" "card.php (propal)"
 copy_file "${BASE_DIR}/societe/card.php" "/var/www/html/societe/card.php" "card.php (societe)"
-copy_file "${BASE_DIR}/core/menus/standard/eldy.lib.php" "/var/www/html/core/menus/standard/eldy.lib.php" "eldy.lib.php"
-copy_file "${BASE_DIR}/core/menus/standard/empty.php" "/var/www/html/core/menus/standard/empty.php" "empty.php"
+copy_file "dolibarr_data/core/dolibarr_data/core/core/menus/standard/eldy.lib.php" "/var/www/html/core/menus/standard/eldy.lib.php" "eldy.lib.php"
+copy_file "dolibarr_data/core/dolibarr_data/core/core/menus/standard/empty.php" "/var/www/html/core/menus/standard/empty.php" "empty.php"
+
+# Restaurer aussi le hook du menu
+copy_file "dolibarr_data/custom/core/actions_admin.inc.php" "/var/www/html/custom/core/actions_admin.inc.php" "actions_admin.inc.php (hook menu)"
 
 echo "✅ Restauration terminée!"
 

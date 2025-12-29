@@ -92,3 +92,4 @@ file_put_contents($card_file, $content);
 echo "✓ Modifications appliquées\n";
 
 
+

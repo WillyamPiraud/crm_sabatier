@@ -19,6 +19,6 @@ if (isset($menu) && is_object($menu)) {
 	// Le menu "Divers" pointe vers /admin/const.php?mainmenu=home
 	// On ajoute notre menu juste après avec le même niveau (1)
 	// Utiliser leftmenu=const pour qu'il apparaisse sous "Divers"
-	$menu->add("/admin/programmes_previsionnels.php?mainmenu=home&leftmenu=const", $langs->trans("ProgrammesPrevisionnels"), 1);
+	$menu->add("/custom/admin/programmes_previsionnels.php?mainmenu=home&leftmenu=const", $langs->trans("ProgrammesPrevisionnels"), 1);
 }
 

@@ -1,9 +1,9 @@
 --------------
 mysql  Ver 15.1 Distrib 10.11.14-MariaDB, for debian-linux-gnu (aarch64) using  EditLine wrapper
 
-Connection id:		258
+Connection id:		5
 Current database:	
-Current user:		dolibarr@172.25.0.4
+Current user:		dolibarr@172.25.0.3
 SSL:			Not in use
 Current pager:		stdout
 Using outfile:		''
@@ -17,9 +17,9 @@ Db     characterset:	utf8mb4
 Client characterset:	latin1
 Conn.  characterset:	latin1
 TCP port:		3306
-Uptime:			5 hours 15 min 59 sec
+Uptime:			23 sec
 
-Threads: 1  Questions: 7902  Slow queries: 0  Opens: 116  Open tables: 103  Queries per second avg: 0.416
+Threads: 1  Questions: 10  Slow queries: 0  Opens: 17  Open tables: 10  Queries per second avg: 0.434
 --------------
 
 mysql -u dolibarr -pxxxxxx -h db -P 3306 -e "SELECT SCHEMA_NAME FROM information_schema.SCHEMATA WHERE SCHEMA_NAME = 'dolibarr';" > /tmp/docker-run-checkdb.result 2>&1
