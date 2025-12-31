@@ -1214,7 +1214,7 @@ function get_left_menu_home($mainmenu, &$newmenu, $usemenuhider = 1, $leftmenu =
 			$newmenu->add("/admin/sms.php?mainmenu=home", $langs->trans("SMS"), 1);
 			$newmenu->add("/admin/dict.php?mainmenu=home", $langs->trans("Dictionary"), 1);
 			$newmenu->add("/admin/const.php?mainmenu=home", $langs->trans("OtherSetup"), 1);
-			$newmenu->add("/admin/programmes_previsionnels.php?mainmenu=home", $langs->trans("Programmes Prévisionnels"), 1);
+			$newmenu->add("/custom/admin/programmes_previsionnels.php?mainmenu=home", $langs->trans("Programmes Prévisionnels"), 1);
 		}
 
 		// System tools
