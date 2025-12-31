@@ -1,41 +1,42 @@
 #!/bin/bash
-# Script optimisé pour restaurer les fichiers core modifiés dans le container Docker
-# Usage: ./restore_core_files.sh
+# Script pour restaurer les fichiers core modifiés dans le conteneur Docker Dolibarr
 
 CONTAINER_NAME="dolibarr_app"
-BASE_DIR="dolibarr_data/core/dolibarr_data/dolibarr_data/core"
 
-echo "🔄 Restauration des fichiers core modifiés..."
-
-# Vérifier que le container est en cours d'exécution
-if ! docker ps --format "{{.Names}}" | grep -q "^${CONTAINER_NAME}$"; then
-    echo "❌ Erreur: Le container ${CONTAINER_NAME} n'est pas en cours d'exécution"
+# Vérifier que le conteneur est en cours d'exécution
+if ! docker ps | grep -q "$CONTAINER_NAME"; then
+    echo "❌ Erreur : Le conteneur $CONTAINER_NAME n'est pas en cours d'exécution"
     exit 1
 fi
 
-# Fonction pour copier un fichier avec gestion d'erreur
+echo "🔄 Restauration des fichiers core modifiés dans $CONTAINER_NAME..."
+echo ""
+
+# Fonction pour copier un fichier
 copy_file() {
-    local src=$1
+    local source=$1
     local dest=$2
-    local name=$3
+    local description=$3
     
-    if docker cp "${src}" "${CONTAINER_NAME}:${dest}" 2>/dev/null; then
-        echo "✓ ${name} restauré"
-        return 0
+    if [ -f "$source" ]; then
+        docker cp "$source" "$CONTAINER_NAME:$dest"
+        if [ $? -eq 0 ]; then
+            echo "✅ $description restauré"
+        else
+            echo "❌ Erreur lors de la copie de $description"
+        fi
     else
-        echo "✗ Erreur: ${name}"
-        return 1
+        echo "⚠️  Fichier source introuvable : $source"
     fi
 }
 
-# Restaurer tous les fichiers en une seule passe
-copy_file "${BASE_DIR}/comm/propal/card.php" "/var/www/html/comm/propal/card.php" "card.php (propal)"
-copy_file "${BASE_DIR}/societe/card.php" "/var/www/html/societe/card.php" "card.php (societe)"
-copy_file "dolibarr_data/core/dolibarr_data/core/core/menus/standard/eldy.lib.php" "/var/www/html/core/menus/standard/eldy.lib.php" "eldy.lib.php"
-copy_file "dolibarr_data/core/dolibarr_data/core/core/menus/standard/empty.php" "/var/www/html/core/menus/standard/empty.php" "empty.php"
+# Restaurer card_propal.php
+copy_file "dolibarr_data/custom/card_propal.php" "/var/www/html/comm/propal/card.php" "card.php (propal)"
 
-# Restaurer aussi le hook du menu
-copy_file "dolibarr_data/custom/core/actions_admin.inc.php" "/var/www/html/custom/core/actions_admin.inc.php" "actions_admin.inc.php (hook menu)"
+# Restaurer eldy.lib.php si modifié
+if [ -f "dolibarr_data/core/dolibarr_data/core/core/menus/standard/eldy.lib.php" ]; then
+    copy_file "dolibarr_data/core/dolibarr_data/core/core/menus/standard/eldy.lib.php" "/var/www/html/core/menus/standard/eldy.lib.php" "eldy.lib.php"
+fi
 
-echo "✅ Restauration terminée!"
-
+echo ""
+echo "✅ Restauration terminée !"
