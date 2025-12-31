@@ -830,6 +830,333 @@ if (empty($reshook)) {
 				} else {
 					// Needed if object linked modified by trigger (because linked objects can't be fetched two times : linkedObjectsFullLoaded)
 					$locationTarget = DOL_URL_ROOT . '/comm/propal/card.php?id=' . $object->id;
+					
+					// Créer automatiquement un projet UNIQUEMENT si la proposition est acceptée (signée) via confirm_closeas
+					// Ne pas créer lors de la validation directe (PROPAL_SKIP_ACCEPT_REFUSE)
+					// Vérifier que l'ancien statut était VALIDATED (pas DRAFT) pour éviter la création lors de la validation
+					dol_syslog("DEBUG: Vérification création projet - action=confirm_closeas, statut=".GETPOSTINT('statut').", oldstatus=".$oldstatus.", STATUS_SIGNED=".$object::STATUS_SIGNED.", STATUS_VALIDATED=".$object::STATUS_VALIDATED.", module activé=".(isModEnabled('project') ? 'oui' : 'non'));
+					
+					// Créer le projet seulement si :
+					// 1. Le statut demandé est SIGNED
+					// 2. L'ancien statut était VALIDATED (pas DRAFT) - pour éviter la création lors de la validation directe
+					// 3. Le module projet est activé
+					dol_syslog("DEBUG: Vérification création projet - statut demandé=".GETPOSTINT('statut').", STATUS_SIGNED=".$object::STATUS_SIGNED.", oldstatus=".$oldstatus.", STATUS_VALIDATED=".$object::STATUS_VALIDATED.", module=".(isModEnabled('project') ? 'activé' : 'désactivé'));
+					
+					// Vérifier si on doit créer un projet
+					$should_create_project = false;
+					if (GETPOSTINT('statut') == $object::STATUS_SIGNED && isModEnabled('project')) {
+						// Vérifier que l'ancien statut était VALIDATED (pas DRAFT)
+						if ($oldstatus == $object::STATUS_VALIDATED) {
+							$should_create_project = true;
+							dol_syslog("DEBUG: Condition remplie - oldstatus=VALIDATED");
+						} else {
+							dol_syslog("DEBUG: Condition NON remplie - oldstatus=".$oldstatus." (attendu ".$object::STATUS_VALIDATED.")");
+						}
+					}
+					
+					// Créer le projet APRÈS la fermeture de la proposition (dans le commit)
+					// Initialiser la variable pour l'attachement AVANT le bloc if
+					$project_to_attach = null;
+					
+					if ($should_create_project && !$error) {
+						// Vérifier les permissions pour créer un projet
+						$hasRight = $user->hasRight('projet', 'creer');
+						dol_syslog("DEBUG: Permission projet créé=".($hasRight ? 'oui' : 'non'));
+						
+						if ($hasRight) {
+							// Gestion d'erreur pour éviter l'erreur HTTP 500
+							$project_creation_error = false;
+							try {
+								require_once DOL_DOCUMENT_ROOT.'/projet/class/project.class.php';
+								$project = new Project($db);
+							
+							// Entity (entité - DOIT être défini en premier)
+							$project->entity = $conf->entity;
+							
+							// REF est OBLIGATOIRE - doit être générée AVANT la création
+							// La méthode create() vérifie que ref n'est pas vide
+							// Utiliser une référence temporaire qui sera remplacée par Dolibarr si nécessaire
+							// ou générer une référence unique basée sur la propal
+							$project->ref = 'PROJ-'.$object->ref.'-'.date('YmdHis');
+							dol_syslog("DEBUG: Référence projet générée : ".$project->ref);
+							
+							// Nom du projet basé sur la référence de la proposition (REQUIS)
+							$project->title = 'Projet - '.$object->ref;
+							if (!empty($object->thirdparty->name)) {
+								$project->title .= ' - '.$object->thirdparty->name;
+							}
+							
+							// Description du projet avec les informations de la proposition
+							$project->description = 'Projet créé automatiquement à partir de la proposition commerciale '.$object->ref;
+							
+							// Récupérer les extrafields de la proposition
+							require_once DOL_DOCUMENT_ROOT.'/core/class/extrafields.class.php';
+							$extrafields = new ExtraFields($db);
+							$extralabels = $extrafields->fetch_name_optionals_label('propal');
+							$object->fetch_optionals($object->id, $extralabels);
+							
+							// Construire la description avec les extrafields
+							if (!empty($object->array_options['options_intitule_formation'])) {
+								$project->description .= "\n\nIntitulé de formation : ".$object->array_options['options_intitule_formation'];
+							}
+							if (!empty($object->array_options['options_nombre_jours_formation'])) {
+								$nb_jours = floatval($object->array_options['options_nombre_jours_formation']);
+								$project->description .= "\nNombre de jours de formation : ".round($nb_jours, 0);
+							}
+							if (!empty($object->array_options['options_tarif_global_ht'])) {
+								$tarif = floatval($object->array_options['options_tarif_global_ht']);
+								$project->description .= "\nTarif global HT : ".number_format(round($tarif, 2), 2, ',', ' ')." €";
+							}
+							if (!empty($object->array_options['options_objectifs_pedagogiques'])) {
+								$project->description .= "\nObjectifs pédagogiques : ".$object->array_options['options_objectifs_pedagogiques'];
+							}
+							if (!empty($object->array_options['options_lieu_previsionnel'])) {
+								$project->description .= "\nLieu prévisionnel : ".$object->array_options['options_lieu_previsionnel'];
+							}
+							if (!empty($object->array_options['options_type_formation'])) {
+								$project->description .= "\nType de formation : ".$object->array_options['options_type_formation'];
+							}
+							if (!empty($object->note_public)) {
+								$project->description .= "\n\n".$object->note_public;
+							}
+							
+							// Lier au tiers (REQUIS)
+							$project->socid = $object->socid;
+							
+							// Date de début (date de la proposition ou aujourd'hui) - REQUIS
+							$project->date_start = $object->datep ? $object->datep : dol_now();
+							
+							// Date de fin (optionnelle)
+							$project->date_end = null;
+							
+							// Statut : en cours (REQUIS)
+							// Dolibarr utilise 'status' pour la création (mappé vers 'fk_statut' en base)
+							$project->status = 1; // 1 = en cours (Validated/Opened)
+							$project->statut = 1; // Compatibilité (déprécié mais utilisé pour l'affichage)
+							
+							// Public (visible par tous)
+							$project->public = 1;
+							
+							// Usage bill time
+							$project->usage_bill_time = 0;
+							
+							// Usage task time
+							$project->usage_task_time = 0;
+							
+							// Opp status
+							$project->opp_status = '';
+							
+							// Opp amount
+							$project->opp_amount = 0;
+							
+							// Opp_percent
+							$project->opp_percent = 0;
+							
+							// Vérifications finales avant création
+							if (empty($project->title)) {
+								$project->title = 'Projet - '.$object->ref;
+							}
+							if (empty($project->entity)) {
+								$project->entity = $conf->entity;
+							}
+							if (empty($project->socid)) {
+								dol_syslog("ERROR: socid est vide pour la propal ".$object->ref, LOG_ERR);
+								setEventMessage('Erreur : Le client est requis pour créer le projet', 'errors');
+								$error++;
+							}
+							if (empty($project->date_start)) {
+								$project->date_start = dol_now();
+							}
+							if (empty($project->status) && $project->status !== 0) {
+								$project->status = 1;
+								$project->statut = 1; // Compatibilité
+							}
+							
+							// Vérifications AVANT création - tous les champs requis doivent être définis
+							if (empty($project->ref)) {
+								$project->ref = 'PROJ-'.$object->ref.'-'.date('YmdHis');
+								dol_syslog("WARNING: ref était vide, utilisation de : ".$project->ref, LOG_WARNING);
+							}
+							if (empty($project->title)) {
+								$project->title = 'Projet - '.$object->ref;
+								dol_syslog("WARNING: title était vide, utilisation de : ".$project->title, LOG_WARNING);
+							}
+							if (empty($project->entity)) {
+								$project->entity = $conf->entity;
+								dol_syslog("WARNING: entity était vide, utilisation de : ".$project->entity, LOG_WARNING);
+							}
+							if (empty($project->date_start)) {
+								$project->date_start = dol_now();
+								dol_syslog("WARNING: date_start était vide, utilisation de : ".$project->date_start, LOG_WARNING);
+							}
+							if (empty($project->status) && $project->status !== 0) {
+								$project->status = 1;
+								$project->statut = 1; // Compatibilité
+								dol_syslog("WARNING: status était vide, utilisation de : ".$project->status, LOG_WARNING);
+							}
+							
+							// Logs détaillés avant création
+							dol_syslog("DEBUG: === CRÉATION PROJET ===");
+							dol_syslog("DEBUG: ref=".$project->ref." (vide=".(empty($project->ref) ? 'OUI' : 'NON').")");
+							dol_syslog("DEBUG: title=".$project->title." (vide=".(empty($project->title) ? 'OUI' : 'NON').")");
+							dol_syslog("DEBUG: entity=".$project->entity." (vide=".(empty($project->entity) ? 'OUI' : 'NON').")");
+							dol_syslog("DEBUG: socid=".$project->socid." (vide=".(empty($project->socid) ? 'OUI' : 'NON').")");
+							dol_syslog("DEBUG: date_start=".$project->date_start." (vide=".(empty($project->date_start) ? 'OUI' : 'NON').")");
+							dol_syslog("DEBUG: statut=".$project->statut." (vide=".(empty($project->statut) && $project->statut !== 0 ? 'OUI' : 'NON').")");
+							dol_syslog("DEBUG: usage_bill_time=".$project->usage_bill_time);
+							dol_syslog("DEBUG: usage_task_time=".$project->usage_task_time);
+							dol_syslog("DEBUG: opp_status=".$project->opp_status);
+							dol_syslog("DEBUG: opp_amount=".$project->opp_amount);
+							dol_syslog("DEBUG: opp_percent=".$project->opp_percent);
+							
+							// Vérification finale : s'assurer que ref n'est pas vide
+							if (empty(trim($project->ref))) {
+								$project->ref = 'PROJ-'.$object->ref.'-'.date('YmdHis');
+							}
+							
+								// Créer le projet seulement si pas d'erreur et si tous les champs requis sont définis
+								dol_syslog("DEBUG: AVANT création - error=".$error.", ref=".$project->ref.", title=".$project->title.", entity=".$project->entity);
+								if (!$error && !empty(trim($project->ref)) && !empty(trim($project->title)) && !empty($project->entity)) {
+									dol_syslog("DEBUG: Appel à project->create() avec ref='".$project->ref."', title='".$project->title."', entity=".$project->entity);
+									$project_id = $project->create($user);
+									dol_syslog("DEBUG: Résultat project->create() = ".$project_id);
+								
+									if ($project_id > 0) {
+									dol_syslog("DEBUG: Projet créé avec succès, ID=".$project_id.", REF=".$project->ref);
+									
+									// Lier le projet à la proposition commerciale
+									require_once DOL_DOCUMENT_ROOT.'/core/lib/link.lib.php';
+									$result_link = $project->add_object_linked('propal', $object->id);
+									
+									if ($result_link > 0) {
+										setEventMessage('Projet créé automatiquement : '.$project->ref);
+										dol_syslog("SUCCESS: Projet créé automatiquement pour la proposition ".$object->ref." : ".$project->ref);
+									} else {
+										setEventMessage('Projet créé automatiquement : '.$project->ref.'. Note : La liaison à la proposition a échoué.', 'warnings');
+										dol_syslog("WARNING: Erreur lors de la liaison du projet à la proposition : ".$project->error, LOG_WARNING);
+									}
+									
+									// Stocker les infos du projet pour l'attachement après le commit
+									// IMPORTANT : Utiliser la variable globale définie avant le try pour éviter les problèmes de portée
+									$project_to_attach = array(
+										'id' => $project_id,
+										'ref' => $project->ref,
+										'project_obj' => clone $project // Cloner pour éviter les problèmes de référence
+									);
+									dol_syslog("DEBUG: project_to_attach défini DANS LE TRY - ID=".$project_id.", REF=".$project->ref);
+								} else {
+									dol_syslog("ERROR: project->create() a échoué - project_id=".$project_id.", error=".$project->error);
+									$error_msg = 'Erreur lors de la création du projet';
+									if (!empty($project->error)) {
+										$error_msg .= ' : '.$project->error;
+										dol_syslog("ERROR: project->error = ".$project->error, LOG_ERR);
+									}
+									if (!empty($project->errors) && is_array($project->errors)) {
+										$error_msg .= ' - '.implode(', ', $project->errors);
+										dol_syslog("ERROR: project->errors = ".print_r($project->errors, true), LOG_ERR);
+									}
+									setEventMessage($error_msg, 'errors');
+									dol_syslog("ERROR: === ÉCHEC CRÉATION PROJET ===");
+									dol_syslog("ERROR: titre=".$project->title);
+									dol_syslog("ERROR: entity=".$project->entity);
+									dol_syslog("ERROR: socid=".$project->socid);
+									dol_syslog("ERROR: date_start=".$project->date_start);
+									dol_syslog("ERROR: statut=".$project->statut);
+									dol_syslog("ERROR: ref=".$project->ref);
+									dol_syslog("ERROR: error=".$project->error);
+									if (!empty($project->errors)) {
+										dol_syslog("ERROR: errors=".print_r($project->errors, true), LOG_ERR);
+									}
+								}
+							} else {
+								dol_syslog("ERROR: Erreurs détectées avant création du projet, création annulée - error=".$error.", ref=".$project->ref.", title=".$project->title.", entity=".$project->entity, LOG_ERR);
+							}
+							} catch (Exception $e) {
+								// Vérifier si le projet a quand même été créé malgré l'exception
+								if (isset($project_id) && $project_id > 0) {
+									dol_syslog("WARNING: Exception après création du projet (ID=".$project_id.") : ".$e->getMessage(), LOG_WARNING);
+									// Ne pas afficher d'erreur si le projet a été créé
+								} else {
+									dol_syslog("ERROR: Exception lors de la création du projet : ".$e->getMessage(), LOG_ERR);
+									dol_syslog("ERROR: Trace : ".$e->getTraceAsString(), LOG_ERR);
+									setEventMessage('Attention : La proposition a été signée mais le projet n\'a pas pu être créé automatiquement. Erreur : '.$e->getMessage(), 'warnings');
+								}
+							} catch (Error $e) {
+								// Vérifier si le projet a quand même été créé malgré l'erreur fatale
+								if (isset($project_id) && $project_id > 0) {
+									dol_syslog("WARNING: Erreur fatale après création du projet (ID=".$project_id.") : ".$e->getMessage(), LOG_WARNING);
+									// Ne pas afficher d'erreur si le projet a été créé
+								} else {
+									dol_syslog("ERROR: Erreur fatale lors de la création du projet : ".$e->getMessage(), LOG_ERR);
+									dol_syslog("ERROR: Trace : ".$e->getTraceAsString(), LOG_ERR);
+									setEventMessage('Attention : La proposition a été signée mais le projet n\'a pas pu être créé automatiquement. Erreur fatale : '.$e->getMessage(), 'warnings');
+								}
+							}
+						} else {
+							dol_syslog("DEBUG: Pas de permission pour créer un projet", LOG_WARNING);
+						}
+					} // Fin du bloc if ($should_create_project)
+				}
+				
+				// DEBUG : Vérifier si project_to_attach est défini AVANT le commit
+				dol_syslog("DEBUG: AVANT commit - project_to_attach défini=".(isset($project_to_attach) ? 'OUI (ID='.(isset($project_to_attach['id']) ? $project_to_attach['id'] : 'NON DÉFINI').')' : 'NON'));
+				// SOLUTION DE CONTOUR : Si project_to_attach n'est pas défini mais que le projet existe, le récupérer depuis la base
+				if (!isset($project_to_attach) || empty($project_to_attach['id'])) {
+					// Chercher le dernier projet créé pour cette propal directement dans la base
+					if (isset($object) && !empty($object->id)) {
+						require_once DOL_DOCUMENT_ROOT.'/projet/class/project.class.php';
+						// Chercher le projet lié directement via la table de liens
+						$sql_project = "SELECT p.rowid, p.ref";
+						$sql_project .= " FROM ".MAIN_DB_PREFIX."projet p";
+						$sql_project .= " INNER JOIN ".MAIN_DB_PREFIX."element_element ee ON p.rowid = ee.fk_target";
+						$sql_project .= " WHERE ee.fk_source = ".((int)$object->id);
+						$sql_project .= " AND ee.sourcetype = 'propal'";
+						$sql_project .= " AND ee.targettype = 'project'";
+						$sql_project .= " ORDER BY p.rowid DESC";
+						$sql_project .= " LIMIT 1";
+						
+						dol_syslog("DEBUG: Requête SQL projet: ".$sql_project);
+						$res_project = $db->query($sql_project);
+						
+						if ($res_project && $db->num_rows($res_project) > 0) {
+							$obj_project = $db->fetch_object($res_project);
+							dol_syslog("DEBUG: Projet trouvé via element_element - ID=".$obj_project->rowid.", REF=".$obj_project->ref);
+							$project_reload = new Project($db);
+							if ($project_reload->fetch($obj_project->rowid) > 0) {
+								$project_to_attach = array(
+									'id' => $project_reload->id,
+									'ref' => $project_reload->ref,
+									'project_obj' => $project_reload
+								);
+								dol_syslog("DEBUG: project_to_attach RÉCUPÉRÉ depuis element_element - ID=".$project_reload->id);
+							}
+						} else {
+							// Méthode 2 : Chercher par référence (les projets créés ont une ref qui contient la ref de la propal)
+							dol_syslog("DEBUG: Aucun projet trouvé via element_element, tentative par référence");
+							$sql_project2 = "SELECT rowid, ref FROM ".MAIN_DB_PREFIX."projet";
+							$sql_project2 .= " WHERE ref LIKE 'PROJ-".$db->escape($object->ref)."-%'";
+							$sql_project2 .= " ORDER BY rowid DESC LIMIT 1";
+							
+							dol_syslog("DEBUG: Requête SQL projet par ref: ".$sql_project2);
+							$res_project2 = $db->query($sql_project2);
+							
+							if ($res_project2 && $db->num_rows($res_project2) > 0) {
+								$obj_project2 = $db->fetch_object($res_project2);
+								dol_syslog("DEBUG: Projet trouvé par référence - ID=".$obj_project2->rowid.", REF=".$obj_project2->ref);
+								$project_reload2 = new Project($db);
+								if ($project_reload2->fetch($obj_project2->rowid) > 0) {
+									$project_to_attach = array(
+										'id' => $project_reload2->id,
+										'ref' => $project_reload2->ref,
+										'project_obj' => $project_reload2
+									);
+									dol_syslog("DEBUG: project_to_attach RÉCUPÉRÉ par référence - ID=".$project_reload2->id);
+								}
+							} else {
+								dol_syslog("DEBUG: Aucun projet trouvé par référence non plus pour propal ".$object->ref);
+							}
+						}
+					}
 				}
 
 				$deposit = null;
@@ -862,6 +1189,25 @@ if (empty($reshook)) {
 
 				if (!$error) {
 					$db->commit();
+					
+					// Attacher les PDFs des programmes prévisionnels au projet APRÈS le commit
+					dol_syslog("DEBUG: Après commit - project_to_attach défini=".(isset($project_to_attach) ? 'OUI' : 'NON'));
+					if (isset($project_to_attach) && is_array($project_to_attach) && !empty($project_to_attach['id']) && $project_to_attach['id'] > 0) {
+						dol_syslog("DEBUG: project_to_attach valide - ID=".$project_to_attach['id']);
+						// S'assurer que $project_id est défini pour le script inclus
+						$project_id = $project_to_attach['id'];
+						$project = $project_to_attach['project_obj'];
+						
+						$attach_file = DOL_DOCUMENT_ROOT.'/custom/core/actions/attach_programmes_to_project.inc.php';
+						if (file_exists($attach_file)) {
+							dol_syslog("DEBUG: Inclusion du script d'attachement des fichiers (project_id=".$project_id.")");
+							include $attach_file;
+						} else {
+							$error_msg = "WARNING: Fichier d'attachement introuvable: ".$attach_file;
+							dol_syslog($error_msg, LOG_WARNING);
+							setEventMessage($error_msg, 'warnings');
+						}
+					}
 
 					if ($deposit && !getDolGlobalString('MAIN_DISABLE_PDF_AUTOUPDATE')) {
 						$ret = $deposit->fetch($deposit->id); // Reload to get new records
@@ -880,7 +1226,15 @@ if (empty($reshook)) {
 						}
 					}
 
-					if ($locationTarget) {
+					// NE PAS rediriger immédiatement si on vient d'attacher des fichiers
+					// Laisser le code d'attachement s'exécuter complètement
+					if ($locationTarget && (!isset($project_to_attach) || empty($project_to_attach['id']))) {
+						header('Location: ' . $locationTarget);
+						exit;
+					}
+					// Si un projet a été créé et attaché, rediriger vers la page de la propal pour voir les messages
+					if ($locationTarget && isset($project_to_attach) && !empty($project_to_attach['id'])) {
+						// Attendre un peu pour que les fichiers soient attachés, puis rediriger
 						header('Location: ' . $locationTarget);
 						exit;
 					}
@@ -892,6 +1246,104 @@ if (empty($reshook)) {
 					$action = '';
 				}
 			}
+		}
+	} elseif ($action == 'create_project' && $object->status == Propal::STATUS_SIGNED && isModEnabled('project') && $user->hasRight('projet', 'creer')) {
+		// Créer un projet pour une proposition déjà signée
+		require_once DOL_DOCUMENT_ROOT.'/projet/class/project.class.php';
+		require_once DOL_DOCUMENT_ROOT.'/core/lib/link.lib.php';
+		
+		// Vérifier si un projet existe déjà
+		$object->load_object_linked();
+		$hasProject = false;
+		if (!empty($object->linkedObjects['project'])) {
+			foreach ($object->linkedObjects['project'] as $linkedProject) {
+				$hasProject = true;
+				break;
+			}
+		}
+		
+		if (!$hasProject) {
+			$db->begin();
+			
+			$project = new Project($db);
+			
+			// Nom du projet basé sur la référence de la proposition
+			$project->title = 'Projet - '.$object->ref;
+			if (!empty($object->thirdparty->name)) {
+				$project->title .= ' - '.$object->thirdparty->name;
+			}
+			
+			// Description du projet avec les informations de la proposition
+			$project->description = 'Projet créé automatiquement à partir de la proposition commerciale '.$object->ref;
+			
+			// Récupérer les extrafields de la proposition
+			require_once DOL_DOCUMENT_ROOT.'/core/class/extrafields.class.php';
+			$extrafields = new ExtraFields($db);
+			$extralabels = $extrafields->fetch_name_optionals_label('propal');
+			$object->fetch_optionals($object->id, $extralabels);
+			
+			// Construire la description avec les extrafields
+			if (!empty($object->array_options['options_intitule_formation'])) {
+				$project->description .= "\n\nIntitulé de formation : ".$object->array_options['options_intitule_formation'];
+			}
+			if (!empty($object->array_options['options_nombre_jours_formation'])) {
+				$nb_jours = floatval($object->array_options['options_nombre_jours_formation']);
+				$project->description .= "\nNombre de jours de formation : ".round($nb_jours, 0);
+			}
+			if (!empty($object->array_options['options_tarif_global_ht'])) {
+				$tarif = floatval($object->array_options['options_tarif_global_ht']);
+				$project->description .= "\nTarif global HT : ".number_format(round($tarif, 2), 2, ',', ' ')." €";
+			}
+			if (!empty($object->array_options['options_objectifs_pedagogiques'])) {
+				$project->description .= "\nObjectifs pédagogiques : ".$object->array_options['options_objectifs_pedagogiques'];
+			}
+			if (!empty($object->array_options['options_lieu_previsionnel'])) {
+				$project->description .= "\nLieu prévisionnel : ".$object->array_options['options_lieu_previsionnel'];
+			}
+			if (!empty($object->array_options['options_type_formation'])) {
+				$project->description .= "\nType de formation : ".$object->array_options['options_type_formation'];
+			}
+			if (!empty($object->note_public)) {
+				$project->description .= "\n\n".$object->note_public;
+			}
+			if (!empty($object->note_public)) {
+				$project->description .= "\n\n".$object->note_public;
+			}
+			
+			// Lier au tiers
+			$project->socid = $object->socid;
+			
+			// Date de début (date de la proposition ou aujourd'hui)
+			$project->date_start = $object->datep ? $object->datep : dol_now();
+			
+			// Statut : en cours
+			$project->statut = 1; // 1 = en cours
+			
+			// Public (visible par tous)
+			$project->public = 1;
+			
+			// Créer le projet
+			$project_id = $project->create($user);
+			
+			if ($project_id > 0) {
+				// Lier le projet à la proposition commerciale
+				$result_link = $project->add_object_linked('propal', $object->id);
+				
+				if ($result_link > 0) {
+					$db->commit();
+					setEventMessage('Projet créé avec succès : '.$project->ref);
+					header('Location: '.$_SERVER["PHP_SELF"].'?id='.$object->id);
+					exit;
+				} else {
+					$db->rollback();
+					setEventMessages('Erreur lors de la liaison du projet : '.$project->error, $project->errors, 'errors');
+				}
+			} else {
+				$db->rollback();
+				setEventMessages('Erreur lors de la création du projet : '.$project->error, $project->errors, 'errors');
+			}
+		} else {
+			setEventMessage('Un projet est déjà lié à cette proposition commerciale', 'warnings');
 		}
 	} elseif ($action == 'confirm_reopen' && $usercanreopen && !GETPOST('cancel', 'alpha')) {
 		// Reopen proposal
@@ -3504,21 +3956,22 @@ if ($action == 'create') {
 
 	print dol_get_fiche_end();
 
-
 	/*
 	 * Button Actions
 	 */
 
-	if ($action != 'presend') {
-		$numlines = count($object->lines);
-		print '<div class="tabsAction">';
+	// Button Actions
+	$numlines = count($object->lines);
+	print '<div class="tabsAction">';
 
-		$parameters = array();
-		$reshook = $hookmanager->executeHooks('addMoreActionsButtons', $parameters, $object, $action); // Note that $action and $object may have been
-		// modified by hook
-		if (empty($reshook)) {
-			if ($action != 'editline') {
-				// Subtotal
+	$parameters = array();
+	$reshook = $hookmanager->executeHooks('addMoreActionsButtons', $parameters, $object, $action); // Note that $action and $object may have been
+	// modified by hook
+	// Toujours afficher les boutons même si un hook retourne quelque chose
+	print '<!-- DEBUG: reshook='.var_export($reshook, true).' -->';
+	if (empty($reshook) || 1) {
+		if ($action != 'editline' && $action != 'presend') {
+			// Subtotal
 				if ($object->status == Propal::STATUS_DRAFT && isModEnabled('subtotals') && getDolGlobalString('SUBTOTAL_TITLE_'.strtoupper($object->element))) {
 					$langs->load('subtotals');
 
@@ -3543,13 +3996,13 @@ if ($action == 'create') {
 					print dolGetButtonAction('', $langs->trans('Subtotal'), 'default', $url_button, '', true);
 				}
 
-				// Validate
+				// Validate - Afficher pour les brouillons avec des lignes
 				if (($object->status == Propal::STATUS_DRAFT && $object->total_ttc >= 0 && count($object->lines) > 0)
 					|| ($object->status == Propal::STATUS_DRAFT && getDolGlobalString('PROPAL_ENABLE_NEGATIVE') && count($object->lines) > 0)) {
 					if ($usercanvalidate) {
 						print '<a class="butAction" href="'.$_SERVER["PHP_SELF"].'?id='.$object->id.'&action=validate&token='.newToken().'">'.(!getDolGlobalString('PROPAL_SKIP_ACCEPT_REFUSE') ? $langs->trans('Validate') : $langs->trans('ValidateAndSign')).'</a>';
 					} else {
-						print '<a class="butActionRefused classfortooltip" href="#">'.$langs->trans('Validate').'</a>';
+						print '<a class="butActionRefused classfortooltip" href="#" title="'.$langs->trans("NotEnoughPermissions").'">'.$langs->trans('Validate').'</a>';
 					}
 				}
 				// Create event
@@ -3557,9 +4010,41 @@ if ($action == 'create') {
 				{
 					print '<a class="butAction" href="' . DOL_URL_ROOT . '/comm/action/card.php?action=create&amp;origin=' . $object->element . '&amp;originid=' . $object->id . '&amp;socid=' . $object->socid . '">' . $langs->trans("AddAction") . '</a></div>';
 				}*/
-				// Edit
+				// Edit - Afficher pour les propals validées
 				if ($object->status == Propal::STATUS_VALIDATED && $usercancreate) {
 					print '<a class="butAction" href="'.$_SERVER["PHP_SELF"].'?id='.$object->id.'&action=modif&token='.newToken().'">'.$langs->trans('Modify').'</a>';
+				}
+
+				// Bouton pour créer un projet si la proposition est signée et n'a pas de projet
+				if ($object->status == Propal::STATUS_SIGNED) {
+					$hasProject = false;
+					$canCreateProject = false;
+					
+					if (isModEnabled('project') && $user->hasRight('projet', 'creer')) {
+						$canCreateProject = true;
+						// Vérifier si un projet est déjà lié à cette proposition
+						try {
+							if (file_exists(DOL_DOCUMENT_ROOT.'/projet/class/project.class.php')) {
+								require_once DOL_DOCUMENT_ROOT.'/projet/class/project.class.php';
+								require_once DOL_DOCUMENT_ROOT.'/core/lib/link.lib.php';
+								
+								$object->load_object_linked();
+								if (!empty($object->linkedObjects['project'])) {
+									foreach ($object->linkedObjects['project'] as $linkedProject) {
+										$hasProject = true;
+										break;
+									}
+								}
+							}
+						} catch (Exception $e) {
+							dol_syslog("Erreur lors de la vérification des projets liés: ".$e->getMessage(), LOG_WARNING);
+						}
+					}
+					
+					if ($canCreateProject && !$hasProject) {
+						// Bouton pour créer le projet manuellement
+						print '<a class="butAction" href="'.$_SERVER["PHP_SELF"].'?id='.$object->id.'&action=create_project&token='.newToken().'">Créer projet</a> ';
+					}
 				}
 
 				// ReOpen
@@ -3572,10 +4057,87 @@ if ($action == 'create') {
 					}
 				}
 
-				// Send
+				// Send - Toujours afficher pour les propals signées
 				if (empty($user->socid)) {
 					if ($object->status == Propal::STATUS_VALIDATED || $object->status == Propal::STATUS_SIGNED || getDolGlobalString('PROPOSAL_SENDBYEMAIL_FOR_ALL_STATUS')) {
-						print dolGetButtonAction('', $langs->trans('SendMail'), 'default', $_SERVER["PHP_SELF"].'?action=presend&token='.newToken().'&id='.$object->id.'&mode=init#formmailbeforetitle', '', $usercansend);
+						if ($usercansend) {
+							print dolGetButtonAction('', $langs->trans('SendMail'), 'default', $_SERVER["PHP_SELF"].'?action=presend&token='.newToken().'&id='.$object->id.'&mode=init#formmailbeforetitle', '', 1);
+						} else {
+							print '<a class="butActionRefused classfortooltip" href="#" title="'.$langs->trans("NotEnoughPermissions").'">'.$langs->trans('SendMail').'</a>';
+						}
+					}
+				}
+				
+				// Bouton pour exporter vers le client mail par défaut - toujours visible si propal existe et a des lignes
+				if ($object->id > 0 && count($object->lines) > 0) {
+					// Générer le PDF si ce n'est pas déjà fait
+					if (empty($object->last_main_doc)) {
+						$outputlangs = $langs;
+						$hidedetails = 0;
+						$hidedesc = 0;
+						$hideref = 0;
+						$result = $object->generateDocument($object->modelpdf, $outputlangs, $hidedetails, $hidedesc, $hideref);
+						if ($result > 0) {
+							$object->fetch($object->id); // Recharger pour avoir last_main_doc
+						}
+					}
+					
+					// Récupérer l'email de facturation du tiers
+					$email_dest = '';
+					if (!empty($object->thirdparty->email)) {
+						$email_dest = $object->thirdparty->email;
+					} elseif (!empty($object->thirdparty->email_facturation)) {
+						$email_dest = $object->thirdparty->email_facturation;
+					} elseif (!empty($object->thirdparty->email_invoice)) {
+						$email_dest = $object->thirdparty->email_invoice;
+					}
+					
+					// Si pas d'email trouvé, essayer depuis les contacts
+					if (empty($email_dest)) {
+						require_once DOL_DOCUMENT_ROOT.'/contact/class/contact.class.php';
+						$contact = new Contact($db);
+						$contacts = $contact->getContactArray($object->socid, 1, 'BILLING');
+						if (!empty($contacts) && isset($contacts[0]['email'])) {
+							$email_dest = $contacts[0]['email'];
+						}
+					}
+					
+					// Construire le sujet en français
+					$subject_mailto = "Proposition commerciale - ".$object->ref;
+					if (!empty($object->thirdparty->name)) {
+						$subject_mailto .= ' - '.$object->thirdparty->name;
+					}
+					
+					// Construire le message en français
+					$message_mailto = "Bonjour ".($object->thirdparty->name ?? '').",\n\n";
+					$message_mailto .= "Veuillez trouver ci-joint la proposition commerciale ".$object->ref.".\n\n";
+					$message_mailto .= "Cordialement,\n";
+					$message_mailto .= $user->firstname.' '.$user->lastname;
+					
+					// Créer le lien mailto:
+					$mailto_link = "mailto:".($email_dest ? $email_dest : "")."?subject=".rawurlencode($subject_mailto)."&body=".rawurlencode($message_mailto);
+					
+					// Si le PDF existe, créer un script pour télécharger le PDF correctement et ouvrir mailto
+					if (!empty($object->last_main_doc)) {
+						$pdf_path = DOL_DATA_ROOT.'/propal/'.dol_sanitizeFileName($object->ref).'/'.dol_sanitizeFileName($object->last_main_doc);
+						$pdf_url = DOL_URL_ROOT.'/document.php?modulepart=propal&file='.urlencode($object->last_main_doc);
+						
+						if (file_exists($pdf_path)) {
+							// URL du PDF dans Dolibarr
+							$pdf_url = DOL_URL_ROOT.'/document.php?modulepart=propal&file='.urlencode($object->last_main_doc);
+							
+							// Un seul bouton qui ouvre le PDF dans un nouvel onglet ET ouvre le client mail
+							print '<a class="butAction" href="javascript:void(0);" onclick="';
+							print 'window.open(\''.$pdf_url.'\', \'_blank\'); ';
+							print 'setTimeout(function(){ window.location.href = \''.$mailto_link.'\'; }, 500);';
+							print '">Exporter vers mail</a>';
+						} else {
+							// Si le fichier n'existe pas, juste ouvrir mailto
+							print '<a class="butAction" href="'.$mailto_link.'">Exporter vers mail</a>';
+						}
+					} else {
+						// Si pas de PDF, juste ouvrir mailto
+						print '<a class="butAction" href="'.$mailto_link.'">Exporter vers mail</a>';
 					}
 				}
 
@@ -3709,15 +4271,96 @@ if ($action == 'create') {
 
 				// Delete
 				print dolGetButtonAction($langs->trans("Delete"), '', 'delete', $_SERVER["PHP_SELF"].'?id='.$object->id.'&action=delete&token='.newToken(), 'delete', $usercandelete);
+			} else {
+				print '<!-- DEBUG: action='.$action.' bloque l\'affichage -->';
 			}
 		}
 
-		print '</div>';
-	}
+	print '</div>';
 
 	//Select mail models is same action as presend
 	if (GETPOST('modelselected')) {
 		$action = 'presend';
+	}
+
+	// Action pour exporter vers le client mail par défaut
+	if ($action == 'export_to_mail' && $usercansend) {
+		// Récupérer l'email de facturation du tiers
+		$email_destinataire = '';
+		if (!empty($object->thirdparty->email)) {
+			$email_destinataire = $object->thirdparty->email;
+		} elseif (!empty($object->thirdparty->email_facturation)) {
+			$email_destinataire = $object->thirdparty->email_facturation;
+		} elseif (!empty($object->thirdparty->email_invoice)) {
+			$email_destinataire = $object->thirdparty->email_invoice;
+		}
+		
+		// Si pas d'email trouvé, essayer de récupérer depuis les contacts
+		if (empty($email_destinataire)) {
+			require_once DOL_DOCUMENT_ROOT.'/contact/class/contact.class.php';
+			$contact = new Contact($db);
+			$contacts = $contact->getContactArray($object->socid, 1, 'BILLING');
+			if (!empty($contacts) && isset($contacts[0]['email'])) {
+				$email_destinataire = $contacts[0]['email'];
+			}
+		}
+		
+		// Générer le PDF de la proposition si pas déjà généré
+		$model = $object->model_pdf;
+		if (empty($model)) {
+			$model = getDolGlobalString("PROPALE_ADDON_PDF");
+		}
+		
+		$outputlangs = $langs;
+		$hidedetails = 0;
+		$hidedesc = 0;
+		$hideref = 0;
+		
+		$result = $object->generateDocument($model, $outputlangs, $hidedetails, $hidedesc, $hideref);
+		
+		if ($result > 0) {
+			// Récupérer le chemin du PDF généré
+			$filepath = $object->last_main_doc;
+			
+			// Construire l'URL complète de téléchargement du PDF
+			$pdf_url = DOL_URL_ROOT.'/document.php?modulepart=propal&file='.urlencode($filepath);
+			$pdf_url_full = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ? "https" : "http") . "://" . $_SERVER['HTTP_HOST'] . $pdf_url;
+			
+			// Construire le sujet du mail
+			$subject = $langs->trans("CommercialProposal").' - '.$object->ref;
+			if (!empty($object->thirdparty->name)) {
+				$subject .= ' - '.$object->thirdparty->name;
+			}
+			
+			// Construire le corps du message
+			$message = ($langs->trans("Dear") ? $langs->trans("Dear") : "Bonjour").' '.($object->thirdparty->name ?? '').",\n\n";
+			$message .= ($langs->trans("PleaseFindAttached") ? $langs->trans("PleaseFindAttached") : "Veuillez trouver ci-joint")." ".($langs->trans("CommercialProposal") ? $langs->trans("CommercialProposal") : "la proposition commerciale")." ".$object->ref.".\n\n";
+			$message .= ($langs->trans("BestRegards") ? $langs->trans("BestRegards") : "Cordialement").",\n";
+			$message .= $user->firstname.' '.$user->lastname;
+			
+			// Ajouter le lien de téléchargement du PDF dans le message
+			$message .= "\n\n".($langs->trans("DownloadPDF") ? $langs->trans("DownloadPDF") : "Télécharger le PDF").": ".$pdf_url_full;
+			
+			// Encoder pour mailto:
+			$subject_encoded = rawurlencode($subject);
+			$body_encoded = rawurlencode($message);
+			
+			// Créer le lien mailto:
+			$mailto_link = "mailto:".($email_destinataire ? $email_destinataire : "")."?subject=".$subject_encoded."&body=".$body_encoded;
+			
+			// Utiliser JavaScript pour ouvrir le client mail (plus fiable que header Location)
+			print '<script type="text/javascript">';
+			print 'window.location.href = "'.dol_escape_js($mailto_link).'";';
+			print '</script>';
+			print '<noscript>';
+			print '<meta http-equiv="refresh" content="0;url='.dol_escape_html($mailto_link).'">';
+			print '</noscript>';
+			print '<p>'.dol_escape_html($langs->trans("OpeningMailClient")).'... <a href="'.dol_escape_html($mailto_link).'">'.dol_escape_html($langs->trans("ClickHere")).'</a></p>';
+			exit;
+		} else {
+			setEventMessages($object->error, $object->errors, 'errors');
+			$action = '';
+		}
 	}
 
 	if ($action != 'presend') {

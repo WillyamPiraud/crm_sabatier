@@ -22,10 +22,11 @@ $fields = array(
         'type' => 'varchar',
         'size' => 255,
         'pos' => 1,
-        'required' => 0,
+        'required' => 1, // OBLIGATOIRE
         'alwayseditable' => 1,
         'list' => 1,
-        'printable' => 1
+        'printable' => 1,
+        'unique' => 0 // PAS UNIQUE
     ),
     array(
         'name' => 'nombre_jours_formation',
@@ -33,10 +34,11 @@ $fields = array(
         'type' => 'double',
         'size' => '24,8',
         'pos' => 100,
-        'required' => 0,
+        'required' => 1, // OBLIGATOIRE
         'alwayseditable' => 1,
         'list' => 1,
-        'printable' => 1
+        'printable' => 1,
+        'unique' => 0 // PAS UNIQUE
     ),
     array(
         'name' => 'tarif_global_ht',
@@ -44,10 +46,11 @@ $fields = array(
         'type' => 'price',
         'size' => NULL,
         'pos' => 100,
-        'required' => 0,
+        'required' => 1, // OBLIGATOIRE
         'alwayseditable' => 1,
         'list' => 1,
-        'printable' => 1
+        'printable' => 1,
+        'unique' => 0 // PAS UNIQUE
     ),
     array(
         'name' => 'objectifs_pedagogiques',
@@ -55,10 +58,11 @@ $fields = array(
         'type' => 'text',
         'size' => 2000,
         'pos' => 100,
-        'required' => 0,
+        'required' => 1, // OBLIGATOIRE
         'alwayseditable' => 1,
         'list' => 1,
-        'printable' => 1
+        'printable' => 1,
+        'unique' => 0 // PAS UNIQUE
     ),
     array(
         'name' => 'lieu_previsionnel',
@@ -66,10 +70,11 @@ $fields = array(
         'type' => 'varchar',
         'size' => 255,
         'pos' => 100,
-        'required' => 0,
+        'required' => 0, // OPTIONNEL (seul champ non obligatoire)
         'alwayseditable' => 0,
         'list' => 1,
-        'printable' => 1
+        'printable' => 1,
+        'unique' => 0 // PAS UNIQUE
     ),
     array(
         'name' => 'type_formation',
@@ -77,10 +82,11 @@ $fields = array(
         'type' => 'select',
         'size' => NULL,
         'pos' => 100,
-        'required' => 0,
+        'required' => 1, // OBLIGATOIRE
         'alwayseditable' => 1,
         'list' => 1,
         'printable' => 0,
+        'unique' => 0, // PAS UNIQUE
         'param' => 'Intra-entreprise\nInter-entreprise\nE-learning\nPrésentiel\nDistanciel'
     )
 );
@@ -105,7 +111,7 @@ foreach ($fields as $field) {
         'propal',
         $field['pos'],
         $field['required'],
-        0, // unique
+        isset($field['unique']) ? $field['unique'] : 0, // unique (0 = pas unique)
         isset($field['param']) ? $field['param'] : '',
         $field['alwayseditable'],
         $field['list'],

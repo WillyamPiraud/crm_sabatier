@@ -3576,6 +3576,8 @@ if ($action == 'create') {
 				if (empty($user->socid)) {
 					if ($object->status == Propal::STATUS_VALIDATED || $object->status == Propal::STATUS_SIGNED || getDolGlobalString('PROPOSAL_SENDBYEMAIL_FOR_ALL_STATUS')) {
 						print dolGetButtonAction('', $langs->trans('SendMail'), 'default', $_SERVER["PHP_SELF"].'?action=presend&token='.newToken().'&id='.$object->id.'&mode=init#formmailbeforetitle', '', $usercansend);
+						// Bouton pour exporter vers le client mail par défaut
+						print dolGetButtonAction('', ($langs->trans('ExportToMail') != 'ExportToMail' ? $langs->trans('ExportToMail') : 'Exporter vers mail'), 'default', $_SERVER["PHP_SELF"].'?action=export_to_mail&token='.newToken().'&id='.$object->id, '', $usercansend);
 					}
 				}
 
@@ -3718,6 +3720,80 @@ if ($action == 'create') {
 	//Select mail models is same action as presend
 	if (GETPOST('modelselected')) {
 		$action = 'presend';
+	}
+
+	// Action pour exporter vers le client mail par défaut
+	if ($action == 'export_to_mail' && $usercansend) {
+		// Récupérer l'email de facturation du tiers
+		$email_destinataire = '';
+		if (!empty($object->thirdparty->email)) {
+			$email_destinataire = $object->thirdparty->email;
+		} elseif (!empty($object->thirdparty->email_facturation)) {
+			$email_destinataire = $object->thirdparty->email_facturation;
+		} elseif (!empty($object->thirdparty->email_invoice)) {
+			$email_destinataire = $object->thirdparty->email_invoice;
+		}
+		
+		// Si pas d'email trouvé, essayer de récupérer depuis les contacts
+		if (empty($email_destinataire)) {
+			require_once DOL_DOCUMENT_ROOT.'/contact/class/contact.class.php';
+			$contact = new Contact($db);
+			$contacts = $contact->getContactArray($object->socid, 1, 'BILLING');
+			if (!empty($contacts) && isset($contacts[0]['email'])) {
+				$email_destinataire = $contacts[0]['email'];
+			}
+		}
+		
+		// Générer le PDF de la proposition si pas déjà généré
+		$model = $object->model_pdf;
+		if (empty($model)) {
+			$model = getDolGlobalString("PROPALE_ADDON_PDF");
+		}
+		
+		$outputlangs = $langs;
+		$hidedetails = 0;
+		$hidedesc = 0;
+		$hideref = 0;
+		
+		$result = $object->generateDocument($model, $outputlangs, $hidedetails, $hidedesc, $hideref);
+		
+		if ($result > 0) {
+			// Récupérer le chemin du PDF généré
+			$filepath = $object->last_main_doc;
+			
+			// Construire l'URL complète de téléchargement du PDF
+			$pdf_url = DOL_URL_ROOT.'/document.php?modulepart=propal&file='.urlencode($filepath);
+			$pdf_url_full = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ? "https" : "http") . "://" . $_SERVER['HTTP_HOST'] . $pdf_url;
+			
+			// Construire le sujet du mail
+			$subject = $langs->trans("CommercialProposal").' - '.$object->ref;
+			if (!empty($object->thirdparty->name)) {
+				$subject .= ' - '.$object->thirdparty->name;
+			}
+			
+			// Construire le corps du message
+			$message = ($langs->trans("Dear") ? $langs->trans("Dear") : "Bonjour").' '.($object->thirdparty->name ?? '').",\n\n";
+			$message .= ($langs->trans("PleaseFindAttached") ? $langs->trans("PleaseFindAttached") : "Veuillez trouver ci-joint")." ".($langs->trans("CommercialProposal") ? $langs->trans("CommercialProposal") : "la proposition commerciale")." ".$object->ref.".\n\n";
+			$message .= ($langs->trans("BestRegards") ? $langs->trans("BestRegards") : "Cordialement").",\n";
+			$message .= $user->firstname.' '.$user->lastname;
+			
+			// Ajouter le lien de téléchargement du PDF dans le message
+			$message .= "\n\n".($langs->trans("DownloadPDF") ? $langs->trans("DownloadPDF") : "Télécharger le PDF").": ".$pdf_url_full;
+			
+			// Encoder pour mailto:
+			$subject_encoded = rawurlencode($subject);
+			$body_encoded = rawurlencode($message);
+			
+			// Créer le lien mailto:
+			$mailto_link = "mailto:".($email_destinataire ? $email_destinataire : "")."?subject=".$subject_encoded."&body=".$body_encoded;
+			
+			// Rediriger vers le lien mailto: (ouvrira le client mail par défaut)
+			header("Location: ".$mailto_link);
+			exit;
+		} else {
+			setEventMessages($object->error, $object->errors, 'errors');
+			$action = '';
+		}
 	}
 
 	if ($action != 'presend') {
