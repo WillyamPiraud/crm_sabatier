@@ -278,7 +278,7 @@ function print_eldy_menu($db, $atarget, $type_user, &$tabMenu, &$menu, $noout = 
 
 	$menu_arr[] = array(
 		'name' => 'Commercial',
-		'link' => ($onlysupplierorder ? '/fourn/commande/index.php?mainmenu=commercial&amp;leftmenu=' : '/comm/index.php?mainmenu=commercial&amp;leftmenu='),
+		'link' => ($onlysupplierorder ? '/fourn/commande/index.php?mainmenu=commercial&amp;leftmenu=' : '/custom/comm/propal/dashboard.php?mainmenu=commercial&amp;leftmenu=propals'),
 		'title' => "Commercial",
 		'level' => 0,
 		'enabled' => (int) ($showmode = isVisibleToUserType($type_user, $tmpentry, $listofmodulesforexternal)),
@@ -1402,8 +1402,11 @@ function get_left_menu_commercial($mainmenu, &$newmenu, $usemenuhider = 1, $left
 		// Customer proposal
 		if (isModEnabled('propal')) {
 			$langs->load("propal");
-			$newmenu->add("/comm/propal/index.php?leftmenu=propals", $langs->trans("Proposals"), 0, $user->hasRight('propal', 'read'), '', $mainmenu, 'propals', 100, '', '', '', img_picto('', 'propal', 'class="paddingright pictofixedwidth"'));
+			// Rediriger l'entrée principale vers le dashboard commercial custom
+			$newmenu->add("/custom/comm/propal/dashboard.php?mainmenu=commercial&leftmenu=propals", $langs->trans("Dashboard commercial"), 0, $user->hasRight('propal', 'read'), '', $mainmenu, 'propals', 100, '', '', '', img_picto('', 'propal', 'class="paddingright pictofixedwidth"'));
 			$newmenu->add("/comm/propal/card.php?action=create&amp;leftmenu=propals", $langs->trans("NewPropal"), 1, $user->hasRight('propal', 'write'));
+			// Lien direct vers le dashboard dans le menu déroulant du haut
+			$newmenu->add("/custom/comm/propal/dashboard.php?mainmenu=commercial&leftmenu=propals", $langs->trans("Dashboard commercial"), 1, $user->hasRight('propal', 'read'));
 			$newmenu->add("/comm/propal/list.php?leftmenu=propals", $langs->trans("List"), 1, $user->hasRight('propal', 'read'));
 			if ($usemenuhider || empty($leftmenu) || $leftmenu == "propals") {
 				$newmenu->add("/comm/propal/list.php?leftmenu=propals&search_status=0", $langs->trans("PropalsDraft"), 2, $user->hasRight('propal', 'read'));
